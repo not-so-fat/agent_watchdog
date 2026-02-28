@@ -1,0 +1,2 @@
+# Agent-WatchDog Python SDK dependencies
+tavily-python>=0.5.0

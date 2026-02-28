@@ -1,0 +1,5 @@
+/target
+agent-watchdog-ebpf/target
+*.tar.gz
+Agent-WatchDog-dist/
+.DS_Store

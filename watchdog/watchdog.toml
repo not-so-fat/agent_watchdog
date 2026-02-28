@@ -1,0 +1,159 @@
+# ============================================================
+# Agent-WatchDog Configuration
+# ============================================================
+#
+# Copy this file to `watchdog.toml` in the working directory,
+# or pass --config /path/to/watchdog.toml on the command line.
+
+# ── Dry-run mode ──────────────────────────────────────────────
+# When enabled, the system logs alerts to the dashboard but
+# does NOT execute SIGKILL on block requests.
+# Good for initial deployment / testing.
+dry_run = false
+
+# ── Whitelist ─────────────────────────────────────────────────
+# Whitelisted processes are NEVER flagged as sensitive.
+# Matching is case-insensitive.
+
+# Process names to whitelist (match against `comm` field).
+# Examples: system daemons that legitimately read /etc/shadow.
+whitelist_processes = [
+    "systemd",
+    "sshd",
+    "login",
+    "su",
+    "sudo",
+    "passwd",
+    "chpasswd",
+    "useradd",
+    "userdel",
+    "groupadd",
+    "groupdel",
+    "chage",
+    "cron",
+    "crond",
+    "polkitd",
+    "agent-watchdog",
+]
+
+# PIDs to whitelist (use for specific long-running services).
+# These are checked at event time — restart changes PIDs.
+whitelist_pids = []
+
+# File path prefixes to whitelist.
+# Events accessing files under these paths are silently ignored.
+whitelist_paths = [
+    "/proc/",
+    "/sys/",
+    "/dev/",
+]
+
+# ── Target PIDs (eBPF filter) ────────────────────────────────
+# Only PIDs listed here will be monitored by the eBPF probe.
+# When empty, the probe does NOT monitor any process (secure by
+# default).  Add PIDs here or at runtime via the API:
+#   POST /api/config/watch-pid  { "pid": 12345 }
+#
+# To watch an entire agent process tree, resolve the agent's
+# root PID and add it here.
+target_pids = []
+
+# ── Sensitive keywords ────────────────────────────────────────
+# Override the built-in keyword list.
+# If empty or omitted, the compiled-in defaults are used.
+# All comparisons are case-insensitive.
+# sensitive_keywords = [
+#     ".env",
+#     "id_rsa",
+#     "shadow",
+# ]
+
+# ============================================================
+# Firewall / Policy Engine Settings
+# ============================================================
+
+# Default enforcement action when no policy rules match.
+# Values: "allow" (permissive) or "block" (restrictive).
+default_action = "allow"
+
+# Risk score threshold for auto-blocking (0–100).
+# Any tool call with a computed risk >= this threshold is blocked
+# even if no explicit rule matches.
+risk_threshold = 80.0
+
+# Port for the firewall proxy API (separate from the dashboard).
+# Agents send tool-call requests to POST http://<host>:<port>/v1/intercept
+firewall_port = 3001
+
+# ============================================================
+# Anti-Hijack Settings
+# ============================================================
+
+# Maximum age (in seconds) of a command timestamp before it is
+# rejected as a potential replay attack.  Default: 60.
+replay_window_seconds = 60
+
+# Emergency kill-switch.  When enabled, ALL high-risk / mutating
+# tool calls are immediately blocked (system enters read-only mode).
+# Use this in incident response to freeze all agent activity.
+# Default: false.
+kill_switch_enabled = false
+
+# ── Policy Rules ──────────────────────────────────────────────
+# Each [[policy_rule]] is a rule evaluated against incoming tool
+# calls. Rules are processed in order. First match wins.
+#
+# Fields:
+#   id           — unique identifier
+#   description  — human-readable explanation
+#   enabled      — whether the rule is active (default: true)
+#   action       — "block" or "allow"
+#   tools        — glob patterns against tool name (e.g. "shell_*")
+#   arg_contains — substrings to match in the args JSON
+#   agent_ids    — restrict to specific agent IDs
+#   min_risk_score — only fire if risk >= this threshold
+
+[[policy_rule]]
+id = "block-shadow-access"
+description = "Block any tool reading /etc/shadow"
+action = "block"
+arg_contains = ["/etc/shadow"]
+
+[[policy_rule]]
+id = "block-ssh-key-access"
+description = "Block reading SSH private keys"
+action = "block"
+arg_contains = ["id_rsa", "id_ed25519", "id_ecdsa"]
+
+[[policy_rule]]
+id = "block-dangerous-shell"
+description = "Block shell commands that delete files, pipe to bash, or open reverse shells"
+action = "block"
+tools = ["shell_exec", "exec", "run_command", "bash"]
+arg_contains = ["rm -rf", "| bash", "> /dev/", "nc ", "ncat", "netcat", "/dev/sda", "/dev/vda", "dd if="]
+
+[[policy_rule]]
+id = "block-env-exfiltration"
+description = "Block reading .env files, AWS credentials, or kube config"
+action = "block"
+arg_contains = [".env", "aws/credentials", "master.key", ".kube/config"]
+
+[[policy_rule]]
+id = "block-data-exfiltration"
+description = "Block HTTP requests to known exfiltration endpoints"
+action = "block"
+tools = ["http_request", "fetch", "curl", "api_call"]
+arg_contains = ["webhook.site", "ngrok", "pastebin", "requestbin", "hookbin", "pipedream"]
+
+[[policy_rule]]
+id = "block-sql-injection"
+description = "Block SQL injection patterns"
+action = "block"
+tools = ["database_query", "sql_query", "db_exec"]
+arg_contains = ["' or '1'='1", "union select", "drop table"]
+
+[[policy_rule]]
+id = "allow-calculator"
+description = "Always allow safe information tools"
+action = "allow"
+tools = ["calculator", "clock", "search", "tavily_search"]

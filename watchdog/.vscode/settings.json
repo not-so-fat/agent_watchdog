@@ -1,0 +1,31 @@
+{
+    // === GitHub Copilot Settings (ECC-inspired) ===
+    // These settings optimize Copilot's behavior for this Rust + eBPF project.
+    // Tell Copilot to read our custom instructions
+    "github.copilot.chat.codeGeneration.useInstructionFiles": true,
+    // Rust-specific editor settings (aligned with ECC coding-style rules)
+    "editor.formatOnSave": true,
+    "editor.rulers": [
+        100
+    ],
+    "[rust]": {
+        "editor.defaultFormatter": "rust-lang.rust-analyzer",
+        "editor.formatOnSave": true
+    },
+    // rust-analyzer settings
+    "rust-analyzer.check.command": "clippy",
+    "rust-analyzer.cargo.target": "x86_64-unknown-linux-gnu",
+    "rust-analyzer.linkedProjects": [
+        "Cargo.toml"
+    ],
+    // Exclude build artifacts from search/watch (ECC performance rule)
+    "files.watcherExclude": {
+        "**/target/**": true,
+        "**/agent-watchdog-ebpf/target/**": true
+    },
+    "search.exclude": {
+        "**/target": true,
+        "**/*.d": true,
+        "Cargo.lock": true
+    }
+}

@@ -1,0 +1,10 @@
+# Agent-WatchDog — Docker ignore
+# Keep the Docker build context small and fast.
+
+target/
+agent-watchdog-ebpf/target/
+dashboard/node_modules/
+dashboard/dist/
+.git/
+*.tar.gz
+*.log

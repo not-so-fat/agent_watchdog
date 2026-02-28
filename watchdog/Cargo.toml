@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "agent-watchdog",
+    "agent-watchdog-common",
+    "xtask",
+]
+default-members = ["agent-watchdog", "xtask"]
+resolver = "2"
