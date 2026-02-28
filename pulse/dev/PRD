@@ -1,0 +1,252 @@
+# Product Requirements Document: Agentic Wallet Control Portal
+
+**Version:** 1.0  
+**Status:** Draft  
+**MVP Focus:** Enable an AI agent to access x402-protected APIs safely using a fixed procedure skill. Local-only; user-approved session policy.
+
+---
+
+## 1. Problem Statement & Solution
+**The Problem:** "Agentic Leakage." Autonomous AI agents equipped with crypto wallets typically have unrestricted access to funds once authenticated. This creates a high risk of runaway spending or loop-based drain.
+
+**The Solution:** A "Delegated Enforcement Layer." We do not give the agent the wallet. Instead, we give the agent a *proxy* to a local deterministic app that holds the wallet connection. This Local App acts as a gatekeeper, enforcing strict, granular policies (budget, duration, scope) before relaying any transaction to the Coinbase backend.
+
+---
+
+## 2. Core Architecture (MVP)
+
+MVP is **local-only**: Agent ⇄ Local Skills ⇄ Local Portal ⇄ CDP.
+
+### 2.1 Core Concept: Two Skills Only
+
+The agent uses **exactly two** skills:
+
+1. **request_delegation(policy)** — Agent proposes a delegation policy (e.g. allowed_domains, spend limits, TTL). User approves on Local Portal. Portal returns an opaque **session_handle**.
+2. **x402_request(session_handle, url, method?, headers?, body?)** — The agent asks the Portal to perform an HTTP request to the given URL. The **second skill encapsulates the entire x402 protocol**: the agent passes the request; the skill handles 402, payment, and retry internally. **The agent never performs payment logic itself.**
+
+### 2.2 Component Overview
+1.  **The AI Agent (Client / Stochastic)**
+    * **Role:** The "Worker." Runs the LLM loop (cloud or local).
+    * **Constraint:** No direct access to private keys or the Coinbase CLI. No payment logic in agent code.
+    * **Interface:** Only **request_delegation** and **x402_request** talking to Local Portal.
+
+2.  **The Local Portal (Enforcer / Deterministic)**
+    * **Role:** The "Gatekeeper." Desktop app/daemon on the user's machine.
+    * **Capabilities:** Holds CDP auth; runs Policy Engine; executes x402 procedure (request → 402 → validate policy → pay → retry) and wallet operations via CDP SDK. All payment logic lives here.
+
+---
+
+## 3. MVP Authentication & Delegation
+
+- **One-time:** User signs in to Local Portal and connects Coinbase CDP once.
+- **Per task:** User approves a **Delegation Session** via an approval screen (see §3.1 Approval UX). Portal issues an **opaque session_handle** (random). Policy stays local.
+
+### 3.1 Delegation Policy (MVP)
+
+User approves a session with:
+
+- **allowed_domains**
+- **max_total_spend**
+- **max_per_tx**
+- **ttl_seconds**
+- **allowed_operations** = `["x402_request"]`
+
+Portal **denies** any request outside this policy. Agent cannot override policy.
+
+### 3.2 Approval UX
+
+User sees:
+
+- **Agent name**
+- **Allowed domains**
+- **Spend limit**
+- **TTL**
+
+User clicks **Approve**. **session_handle** is returned to the agent (opaque; policy remains in Portal).
+
+---
+
+## 4. Trust Model, Security & Enforcement
+
+### 4.1 Security Assumptions (MVP)
+
+- **Agent treated as semi-trusted.** Agent has no wallet keys; payment logic is only in Local Portal.
+- **Wallet keys never exposed to agent.** All wallet operations run inside Local Portal (CDP SDK).
+- **Local Portal enforces policy.** Deterministic checks (domain, spend, TTL) before any payment.
+- **Funds limited to small amounts.** Session limits (max_total_spend, max_per_tx) keep exposure bounded.
+
+---
+
+### 4.2 Local Portal Security Requirements
+
+#### 4.2.1 Network Isolation
+
+- Bind API to **127.0.0.1** only.
+- Block external access via OS firewall.
+- Prefer **Unix Domain Socket** when possible.
+
+#### 4.2.2 Agent ↔ Portal Authentication
+
+Each request must include:
+
+- **session_handle**
+- **nonce**
+- **HMAC signature** using shared secret in OS keychain
+
+*(mTLS is post-MVP; not required for MVP.)*
+
+Requests without valid auth are **rejected**.
+
+---
+
+### 4.3 Delegation Policy Enforcement
+
+A delegation session must define:
+
+- **allowed_operations**
+- **max_total_spend**
+- **max_per_tx**
+- **allowed_domains**
+- **allowed_recipients**
+- **ttl_seconds**
+- **rate_limit_per_min**
+
+Portal **rejects** any request outside policy. **Agent cannot override policy.**
+
+---
+
+### 4.4 Session Model
+
+#### 4.4.1 Session Handle
+
+Agent receives only an **opaque session_handle**. Full policy remains inside Local Portal.
+
+#### 4.4.2 Expiration
+
+Sessions expire when:
+
+- TTL reached
+- inactivity > timeout
+- budget exhausted
+- user revokes
+
+#### 4.4.3 Replay Protection
+
+Each request must include:
+
+- **monotonic counter**
+- **idempotency key**
+
+Duplicate requests are **denied**.
+
+---
+
+### 4.5 Payment Validation
+
+Before executing x402 payment, Portal verifies:
+
+- domain in **allowlist**
+- recipient matches **actual 402 response**
+- amount within limits
+- tx frequency within **rate limits**
+
+**Hash of the 402 challenge** is stored in audit log.
+
+---
+
+### 4.6 Secure Storage
+
+Local Portal must store:
+
+- CDP refresh token
+- session secrets
+
+using **OS secure storage** (macOS Keychain / Windows Credential Vault).
+
+Secrets must **never** appear in logs.
+
+---
+
+### 4.7 Global Portal Role (Post-MVP)
+
+*Not in MVP.* Later: Global Portal may be management-only (revoke sessions, aggregate spend telemetry). MVP is local-only; Local Portal does not depend on any global service.
+
+---
+
+### 4.8 Skills Integration Policy
+
+- **Coinbase Agent Skills must not be installed directly** into the agent runtime.
+- Only **two** skills are exposed:
+  - **request_delegation(policy)**
+  - **x402_request(session_handle, url, method?, headers?, body?)**
+- Coinbase SDK / wallet CLI run **only** inside Local Portal. Agent never performs payment logic.
+
+---
+
+## 5. Key Workflows
+
+### 5.1 Delegated x402 Access Flow
+
+1. Agent calls **request_delegation(policy)** with proposed allowed_domains, spend limits, TTL.
+2. Local Portal shows **Approval UX** (§3.2): agent name, allowed domains, spend limit, TTL. User clicks Approve.
+3. Portal creates session; returns **session_handle** to agent.
+4. Agent calls **x402_request(session_handle, url, method?, headers?, body?)** for each API call. The skill encapsulates the full x402 flow; agent never does payment logic.
+5. Portal enforces policy: denies if domain not in **allowed_domains**, or budget/TTL exceeded (see deny cases below).
+
+**Skills summary**
+
+| Skill | When to use | Effect |
+|-------|-------------|--------|
+| **request_delegation(policy)** | Before accessing any x402-protected resource. | Sends policy to Local Portal → user approves → **session_handle** returned. |
+| **x402_request(session_handle, url, method?, headers?, body?)** | For any HTTP request that may return 402. | Portal performs request; on 402, parses challenge, validates policy, pays, retries; returns final response + metadata. Agent never performs payment. |
+
+#### Deny cases (Portal returns denied + reason)
+
+| Deny case | Condition | Example deny_code |
+|-----------|-----------|-------------------|
+| **Domain not allowed** | URL domain not in session **allowed_domains** | `DOMAIN_NOT_ALLOWED` |
+| **Budget exceeded** | Would exceed **max_total_spend** or **max_per_tx** | `BUDGET_EXCEEDED`, `PER_TX_EXCEEDED` |
+| **TTL expired** | Session **ttl_seconds** elapsed | `SESSION_EXPIRED` |
+
+---
+
+### 5.2 x402 Procedure (Inside Skill)
+
+The **x402_request** skill implementation (inside Local Portal) **MUST** behave as follows. This ensures **deterministic** behavior:
+
+1. **Send HTTP request** to the given url (with optional method, headers, body).
+2. **If 200** → return response (and metadata) to agent.
+3. **If 402:**
+   - **Parse challenge** from the 402 response.
+   - **Validate policy** (domain allowlist, remaining budget, max_per_tx, TTL). If out of policy → return denied to agent.
+   - **Execute payment** (Portal signs via CDP; agent never touches payment).
+   - **Retry request** (with payment proof as required by x402).
+4. **Return** final response + metadata to agent.
+
+The agent only sees the final HTTP response and metadata; all payment and retry logic is inside the skill.
+
+---
+
+### 5.3 MVP Scope
+
+| Goal | Non-Goals (Post-MVP) |
+|------|----------------------|
+| Enable an AI agent to access **x402-protected APIs safely** using a **fixed procedure skill** (request_delegation + x402_request). | **Global Portal** (dashboard, telemetry, remote kill switch). |
+| Local-only enforcement; user-approved session policy (allowed_domains, spend limits, TTL). | **Multi-device sync.** |
+| Agent never performs payment logic; Portal encapsulates x402. | **Hardware auth** (biometrics/PIN). |
+| | **mTLS.** |
+| | **Key rotation.** |
+| | **Enterprise monitoring.** |
+
+---
+
+## 6. Success Metrics (MVP)
+
+Measure:
+
+| Metric | Use |
+|--------|-----|
+| **% successful x402 calls** | Proportion of x402_request calls that complete (200 after pay + retry). |
+| **% denied calls** | Proportion denied (by policy: domain, budget, TTL). |
+| **Avg approval time** | Time from proposal shown to user clicking Approve. |
+| **User trust feedback** | Qualitative (e.g. survey): Do users feel in control? Trust the delegation model? |

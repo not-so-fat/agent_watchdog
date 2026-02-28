@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Temporal / one-off (per workspace rules)
+.temporal/
+
+# Local DB / runtime data
+*.db
+
+# Environment and secrets
+.env
+.env.local
+*.local
+.agent-pulse-env
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.log
