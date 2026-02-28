@@ -1,0 +1,31 @@
+{
+  "name": "hackathon-agent",
+  "version": "0.1.0",
+  "description": "Autonomous agent under Agent Control Plane (Mastra + Tavily + Neo4j + Pulse)",
+  "main": "dist/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "start:ui": "node dist/server.js",
+    "run": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "dev:ui": "ts-node src/server.ts"
+  },
+  "dependencies": {
+    "@mastra/core": "^1.7.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "neo4j-driver": "^5.26.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
