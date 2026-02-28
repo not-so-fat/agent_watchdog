@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+#
+# awal PATH wrapper -- always blocks direct CLI usage.
+#
+# Pulse calls awal internally (not via PATH), so this wrapper only
+# intercepts manual or agent CLI invocations.  It reports every
+# blocked attempt to the Pulse Watchdog-Lite API.
+#
+# Install:
+#   chmod +x awal
+#   export PATH="<dir-containing-this-wrapper>:$PATH"
+#
+# Config (env vars):
+#   PULSE_URL  – Pulse API base URL (default: http://localhost:4020)
+
+set -euo pipefail
+
+PULSE_URL="${PULSE_URL:-http://localhost:4020}"
+
+# ---- report blocked event to Pulse Watchdog-Lite ----
+report_blocked() {
+  local cmd_args="$*"
+  curl -s -X POST "${PULSE_URL}/api/watchdog/events" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"type\": \"command_blocked\",
+      \"pid\": $$,
+      \"ppid\": $PPID,
+      \"command\": \"awal\",
+      \"args\": $(printf '%s\n' "$cmd_args" | python3 -c 'import sys,json; print(json.dumps(sys.stdin.read().split()))' 2>/dev/null || echo '[]'),
+      \"source_pid_set\": \"cursor\",
+      \"detail\": \"Blocked direct awal execution (PID $$, PPID $PPID)\"
+    }" >/dev/null 2>&1 || true
+}
+
+report_blocked "$@"
+
+echo "" >&2
+echo "===================================================================" >&2
+echo "  BLOCKED by Agent Watchdog" >&2
+echo "" >&2
+echo "  Direct execution of 'awal' is not allowed." >&2
+echo "  Your AI agent must request scoped access through Pulse instead." >&2
+echo "" >&2
+echo "  Use the agent-pulse-delegation skill to request a grant," >&2
+echo "  then call POST ${PULSE_URL}/execute with your session handle." >&2
+echo "" >&2
+echo "  Dashboard: ${PULSE_URL}/dashboard" >&2
+echo "===================================================================" >&2
+echo "" >&2
+exit 1

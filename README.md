@@ -1,6 +1,6 @@
-# Agent Control Plane -- Hackathon Demo
+# Agent Watchdog -- Hackathon Demo
 
-An **Agent Control Plane** that monitors what AI agents do on your machine and controls how they spend your money. The demo uses **Cursor as the AI agent**: Watchdog blocks Cursor from running `awal` directly, and the user grants scoped access through **Pulse**, which handles payment on Cursor's behalf -- autonomously within the approved scope.
+An **Agent Watchdog** that monitors what AI agents do on your machine and controls how they spend your money. **Watchdog** is an eBPF-based runtime that can block or allow processes (e.g. which PIDs may execute payment CLIs). **Pulse** provides scoped access (grants), policy, and x402 payment; the user approves grants via the dashboard. The demo uses **Cursor as the AI agent**: Cursor is not allowed to run `awal` directly; it must go through Pulse.
 
 ## System Overview
 
@@ -13,13 +13,12 @@ An **Agent Control Plane** that monitors what AI agents do on your machine and c
       |                                           |
 +-----v------+                          +---------v---------+
 |  Watchdog  |                          |  Pulse            |
-|  (wrapper) |                          |  (Node.js :4020)  |
+|  (eBPF)    |                          |  (Node.js :4020)  |
 |            |                          |                   |
-|  Block     |                          |  Scoped Access    |
-|  awal from |                          |  Policy engine    |
-|  Cursor    |                          |  x402 engine      |
-|  PIDs      |                          |  Calls awal       |
-|            |                          |  Dashboard        |
+|  Enforce   |                          |  Scoped Access    |
+|  which PIDs|                          |  Policy engine    |
+|  may run   |                          |  x402 engine      |
+|  awal      |                          |  Dashboard        |
 +-----+------+                          +---------+---------+
       |  monitors                                 |  calls
       v                                           v
@@ -57,24 +56,9 @@ Open **http://localhost:4020/dashboard** -- the unified Agent Control Plane dash
 - **Wallet** -- agentic wallet status and transaction history
 - **Security** -- PID tree monitoring, blocked commands log
 
-### 2. Install the awal Wrapper (macOS)
+### 2. Watchdog (enforcement)
 
-The wrapper intercepts `awal` calls and blocks them when they come from Cursor:
-
-```bash
-# Add the wrapper directory to the front of your PATH
-export PATH="$(pwd)/watchdog/awal-wrapper:$PATH"
-
-# Verify (should show the wrapper path first)
-which awal
-```
-
-When Cursor tries to run `awal`, the wrapper:
-1. Walks the process tree to find Cursor as an ancestor
-2. Blocks the call and reports to the Pulse dashboard
-3. Returns a clear error telling Cursor to use the Pulse delegation skill instead
-
-### 3. (Optional) Start Watchdog Rust Daemon (Linux only)
+**Linux:** Watchdog is an eBPF-based daemon that enforces which processes may run the payment CLI. Build and run:
 
 ```bash
 cd watchdog
@@ -83,7 +67,7 @@ cargo build --release
 sudo ./target/release/watchdog   # Runs on :3000
 ```
 
-On macOS, the awal wrapper provides blocking. The Rust daemon adds eBPF-level enforcement on Linux.
+**macOS (demo only):** eBPF is not available. For the hackathon demo we include a small PATH hook under `watchdog/awal-wrapper/` that blocks direct `awal` and reports to Pulse; it is not the production enforcement mechanism.
 
 ---
 
@@ -100,10 +84,10 @@ On macOS, the awal wrapper provides blocking. The Rust daemon adds eBPF-level en
 >
 > In Cursor, ask: "Fetch the latest joke from demo-x402.vercel.app using x402."
 >
-> Cursor tries `awal` -> **BLOCKED**.
-> Dashboard shows: "BLOCKED: Cursor attempted awal"
+> Cursor tries `awal` -> **BLOCKED** (by Watchdog / enforcement layer).
+> Dashboard shows the blocked attempt.
 >
-> "The AI agent tried to pay directly, but Watchdog caught it."
+> "The AI agent tried to pay directly; Watchdog blocks that."
 
 ### 1:00--1:45 -- The Solution
 > "Now I'll grant it scoped access -- a controlled, time-limited permission."
@@ -142,13 +126,6 @@ On macOS, the awal wrapper provides blocking. The Rust daemon adds eBPF-level en
 | `PORT` | Portal port (default: 4020) |
 | `LOCAL_PORTAL_SHARED_SECRET` | **Required.** Secret for HMAC auth |
 | `PUBLIC_BASE_URL` | For remote access (e.g. `http://YOUR_IP:4020`) |
-
-### awal Wrapper
-
-| Variable | Description |
-|----------|-------------|
-| `PULSE_URL` | Pulse API base URL (default: `http://localhost:4020`) |
-| `REAL_AWAL` | Absolute path to real awal binary (auto-detected if unset) |
 
 ---
 
@@ -193,10 +170,10 @@ git add .gitmodules pulse watchdog && git commit -m "Use pulse and watchdog as s
 
 | Component | Role | Port |
 |-----------|------|------|
-| **Pulse** | Scoped access, policy engine, x402 payments, unified dashboard | 4020 |
-| **Watchdog-Lite** | PID tracking + command blocking events (built into Pulse for macOS) | -- |
-| **awal wrapper** | PATH-level interception of `awal` from Cursor process tree | -- |
-| **Watchdog (Rust)** | eBPF-based enforcement (Linux only, optional) | 3000 |
+| **Watchdog** | eBPF-based enforcement: which PIDs may run payment CLI (Linux). See [Agent-WatchDog](https://github.com/isabellakqq/Agent-WatchDog). | 3000 |
+| **Pulse** | Scoped access (grants), policy engine, x402 payments, unified dashboard | 4020 |
+| **Watchdog-Lite** | PID tracking + event log in Pulse (macOS demo; no eBPF) | -- |
+| **awal-wrapper** | macOS demo only: PATH hook to show blocking when eBPF is not available | -- |
 
 ### Key APIs
 
@@ -215,8 +192,7 @@ git add .gitmodules pulse watchdog && git commit -m "Use pulse and watchdog as s
 
 ## Troubleshooting
 
-- **Cursor keeps trying `awal` directly:** Make sure the wrapper is first in PATH (`which awal` should show `watchdog/awal-wrapper/awal`). The wrapper error message tells Cursor to use the Pulse skill.
-- **Wrapper doesn't block:** Verify Cursor process name detection: `ps aux | grep -i cursor`.
-- **Dashboard empty:** Pulse needs to be running. Check `http://localhost:4020/health`.
+- **Blocking not working (macOS demo):** Ensure the PATH hook is first: `export PATH="$(pwd)/watchdog/awal-wrapper:$PATH"`. On Linux, run the eBPF Watchdog daemon.
+- **Dashboard empty:** Pulse must be running. Check `http://localhost:4020/health`.
 - **Wallet not authenticated:** Run `npx awal@latest status` in a terminal and sign in.
-- **Grant approval fails:** Open the dashboard via `localhost` (not `127.0.0.1`) for WebAuthn passkey support.
+- **Grant approval fails:** Use the dashboard at `localhost` (not `127.0.0.1`) for WebAuthn.
