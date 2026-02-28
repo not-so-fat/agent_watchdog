@@ -173,6 +173,20 @@ Or if you already cloned:
 git submodule update --init --recursive
 ```
 
+**One-time (maintainers):** To push pulse content to agent-pulse and switch this repo to submodules:
+
+```bash
+# 1. Push pulse to agent-pulse (from this repo; needs push access to agent-pulse)
+git remote add agent-pulse https://github.com/not-so-fat/agent-pulse.git
+git push agent-pulse pulse-standalone:main
+
+# 2. Replace pulse and watchdog with submodule checkouts
+git rm -r --cached pulse
+mv pulse pulse.bak && git submodule add https://github.com/not-so-fat/agent-pulse.git pulse
+mv watchdog watchdog.bak && git submodule add https://github.com/isabellakqq/Agent-WatchDog.git watchdog
+git add .gitmodules pulse watchdog && git commit -m "Use pulse and watchdog as submodules"
+```
+
 ---
 
 ## Architecture
