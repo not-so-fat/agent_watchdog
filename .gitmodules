@@ -1,0 +1,4 @@
+[submodule "watchdog"]
+	path = watchdog
+	url = https://github.com/isabellakqq/Agent-WatchDog.git
+	branch = main

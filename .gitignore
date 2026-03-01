@@ -1,0 +1,5 @@
+# Temporal / one-off content (see .cursor/rules)
+.temporal/
+
+# Local backup (not for submission)
+watchdog_local_backup/
